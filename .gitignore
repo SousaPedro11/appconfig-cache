@@ -167,10 +167,37 @@ override.tf.json
 
 # Include tfplan files to ignore the plan output of command: terraform plan -out=tfplan
 # example: *tfplan*
+*.tfplan
 
 # Ignore CLI configuration files
 .terraformrc
 terraform.rc
 
 # Ignore example
-example_ts/*
+example_ts/
+
+# Ignore environment variable files
+.env
+.env.*
+
+# k6 test result files
+scripts/k6/*.json
+
+# Coverage / reports
+coverage.out
+cover.html
+coverage/
+reports/
+
+# Docker / Podman
+docker-compose.override.yml
+.docker/
+*.tar
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfplan
+terraform/dev-*.tfvars
+terraform/prd-*.tfvars
