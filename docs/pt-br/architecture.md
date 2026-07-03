@@ -138,6 +138,9 @@ Resposta JSON de exemplo da consulta ao DynamoDB:
 ### Lógica de Fallback do Circuit Breaker
 Se a comunicação com o DynamoDB falhar ou estiver indisponível (por limite de tráfego, rede, etc.), o sistema **faz o fallback transparente para o Circuit Breaker local** (in-memory) em cada container da Lambda, garantindo alta resiliência operacional e evitando que o monitoramento seja um ponto único de falha.
 
+### Concorrência e Performance (I/O Não-Bloqueante)
+Para otimizar o paralelismo sob picos de cache miss, o Circuit Breaker local libera o lock do Mutex antes de executar a chamada externa de rede na AWS AppConfig. Isso impede que requisições lentas para uma configuração (ex: `rh`) bloqueiem e serializem chamadas concorrentes para outras configurações saudáveis e independentes (ex: `backoffice`). Ao fim da chamada de rede, o mutex é re-adquirido de forma thread-safe para atualizar o estado do disjuntor.
+
 ---
 
 ## 5. Estrutura do Projeto Go (Clean Architecture)
@@ -151,6 +154,7 @@ A estrutura de diretórios do repositório é organizada de forma limpa:
 - `internal/domain/`: Regras de negócio essenciais e modelos de dados pura Go.
   - `configuration_request.go`: Valida parâmetros obrigatórios (`application`, `environment`, `profile`).
   - `cache_key.go`: Formatação da chave única de cache.
+  - `configuration.go`: Encapsula o documento de configuração, evitando estados vazios ou inválidos no limite do domínio.
 - `internal/application/`: Casos de uso do sistema.
   - `ports.go`: Interfaces do adaptador de saída (Portas de cache L1/L2 e de origem AWS).
   - `cache_aside_service.go`: Orquestrador central que decide o fluxo L1 -> Singleflight -> L2 -> L3.
