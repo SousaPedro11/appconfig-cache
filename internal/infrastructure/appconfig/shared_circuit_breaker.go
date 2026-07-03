@@ -12,6 +12,8 @@ import (
 	"github.com/sousapedro11/appconfig-cache/internal/domain"
 )
 
+var marshalMap = attributevalue.MarshalMap
+
 type DynamoDBAPI interface {
 	GetItem(ctx context.Context, params *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error)
 	PutItem(ctx context.Context, params *dynamodb.PutItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error)
@@ -83,7 +85,7 @@ func (scb *SharedCircuitBreaker) Call(ctx context.Context, application domain.Ap
 		state.FailureCount++
 		state.LastFailureTime = time.Now().UnixMilli()
 
-		if state.FailureCount >= scb.failureThreshold {
+		if state.FailureCount >= scb.failureThreshold || state.State == string(StateHalfOpen) {
 			state.State = string(StateOpen)
 		}
 
@@ -137,7 +139,7 @@ func (scb *SharedCircuitBreaker) getState(ctx context.Context, application domai
 func (scb *SharedCircuitBreaker) setState(ctx context.Context, state *circuitState) error {
 	state.TTL = time.Now().Add(1 * time.Hour).Unix()
 
-	item, err := attributevalue.MarshalMap(state)
+	item, err := marshalMap(state)
 	if err != nil {
 		return err
 	}

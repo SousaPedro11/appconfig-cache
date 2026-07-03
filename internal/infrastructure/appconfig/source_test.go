@@ -8,6 +8,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/appconfigdata"
+	"github.com/sousapedro11/appconfig-cache/internal/domain"
 )
 
 type mockAppConfigDataAPI struct {
@@ -43,26 +44,25 @@ func TestGetLatestConfiguration_Validation(t *testing.T) {
 	source := NewSource(aws.Config{})
 	ctx := context.Background()
 
-	t.Run("Empty Application", func(t *testing.T) {
-		_, err := source.GetLatestConfiguration(ctx, "", "prd", "default")
-		if err == nil {
-			t.Error("expected validation error, got nil")
-		}
-	})
+	tests := []struct {
+		name string
+		app  string
+		env  string
+		prof string
+	}{
+		{"Empty Application", "", "prd", "default"},
+		{"Empty Environment", "app", "", "default"},
+		{"Empty Profile", "app", "prd", ""},
+	}
 
-	t.Run("Empty Environment", func(t *testing.T) {
-		_, err := source.GetLatestConfiguration(ctx, "app", "", "default")
-		if err == nil {
-			t.Error("expected validation error, got nil")
-		}
-	})
-
-	t.Run("Empty Profile", func(t *testing.T) {
-		_, err := source.GetLatestConfiguration(ctx, "app", "prd", "")
-		if err == nil {
-			t.Error("expected validation error, got nil")
-		}
-	})
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := source.GetLatestConfiguration(ctx, domain.ApplicationID(tc.app), domain.EnvironmentID(tc.env), domain.ProfileID(tc.prof))
+			if err == nil {
+				t.Error("expected validation error, got nil")
+			}
+		})
+	}
 }
 
 func TestGetLatestConfiguration_Success(t *testing.T) {
@@ -94,71 +94,50 @@ func TestGetLatestConfiguration_Success(t *testing.T) {
 }
 
 func TestGetLatestConfiguration_Errors(t *testing.T) {
-	t.Run("StartConfigurationSession fails", func(t *testing.T) {
-		mockErr := errors.New("aws start session error")
-		mockClient := &mockAppConfigDataAPI{
+	mockStartErr := errors.New("aws start session error")
+	mockGetConfigErr := errors.New("aws get config error")
+	tokenVal := "token"
+	emptyToken := ""
+
+	tests := []struct {
+		name             string
+		startSessionFunc func(ctx context.Context, params *appconfigdata.StartConfigurationSessionInput) (*appconfigdata.StartConfigurationSessionOutput, error)
+		getConfigFunc    func(ctx context.Context, params *appconfigdata.GetLatestConfigurationInput) (*appconfigdata.GetLatestConfigurationOutput, error)
+		expectedError    error
+	}{
+		{
+			name: "StartConfigurationSession fails",
 			startSessionFunc: func(ctx context.Context, params *appconfigdata.StartConfigurationSessionInput) (*appconfigdata.StartConfigurationSessionOutput, error) {
-				return nil, mockErr
+				return nil, mockStartErr
 			},
-		}
-
-		source := NewSource(aws.Config{})
-		source.client = mockClient
-
-		_, err := source.GetLatestConfiguration(context.Background(), "app", "prd", "default")
-		if !errors.Is(err, mockErr) {
-			t.Errorf("expected error %v, got %v", mockErr, err)
-		}
-	})
-
-	t.Run("Empty session token", func(t *testing.T) {
-		mockClient := &mockAppConfigDataAPI{
+			expectedError: mockStartErr,
+		},
+		{
+			name: "Empty session token",
 			startSessionFunc: func(ctx context.Context, params *appconfigdata.StartConfigurationSessionInput) (*appconfigdata.StartConfigurationSessionOutput, error) {
-				emptyToken := ""
 				return &appconfigdata.StartConfigurationSessionOutput{
 					InitialConfigurationToken: &emptyToken,
 				}, nil
 			},
-		}
-
-		source := NewSource(aws.Config{})
-		source.client = mockClient
-
-		_, err := source.GetLatestConfiguration(context.Background(), "app", "prd", "default")
-		if err == nil {
-			t.Error("expected error due to empty token, got nil")
-		}
-	})
-
-	t.Run("GetLatestConfiguration fails", func(t *testing.T) {
-		mockErr := errors.New("aws get config error")
-		mockClient := &mockAppConfigDataAPI{
+			expectedError: errors.New("empty AppConfig initial configuration token"),
+		},
+		{
+			name: "GetLatestConfiguration fails",
 			startSessionFunc: func(ctx context.Context, params *appconfigdata.StartConfigurationSessionInput) (*appconfigdata.StartConfigurationSessionOutput, error) {
-				token := "token"
 				return &appconfigdata.StartConfigurationSessionOutput{
-					InitialConfigurationToken: &token,
+					InitialConfigurationToken: &tokenVal,
 				}, nil
 			},
 			getConfigFunc: func(ctx context.Context, params *appconfigdata.GetLatestConfigurationInput) (*appconfigdata.GetLatestConfigurationOutput, error) {
-				return nil, mockErr
+				return nil, mockGetConfigErr
 			},
-		}
-
-		source := NewSource(aws.Config{})
-		source.client = mockClient
-
-		_, err := source.GetLatestConfiguration(context.Background(), "app", "prd", "default")
-		if !errors.Is(err, mockErr) {
-			t.Errorf("expected error %v, got %v", mockErr, err)
-		}
-	})
-
-	t.Run("Empty configuration returned", func(t *testing.T) {
-		mockClient := &mockAppConfigDataAPI{
+			expectedError: mockGetConfigErr,
+		},
+		{
+			name: "Empty configuration returned",
 			startSessionFunc: func(ctx context.Context, params *appconfigdata.StartConfigurationSessionInput) (*appconfigdata.StartConfigurationSessionOutput, error) {
-				token := "token"
 				return &appconfigdata.StartConfigurationSessionOutput{
-					InitialConfigurationToken: &token,
+					InitialConfigurationToken: &tokenVal,
 				}, nil
 			},
 			getConfigFunc: func(ctx context.Context, params *appconfigdata.GetLatestConfigurationInput) (*appconfigdata.GetLatestConfigurationOutput, error) {
@@ -166,16 +145,37 @@ func TestGetLatestConfiguration_Errors(t *testing.T) {
 					Configuration: []byte{},
 				}, nil
 			},
-		}
+			expectedError: errors.New("configuration not found"),
+		},
+	}
 
-		source := NewSource(aws.Config{})
-		source.client = mockClient
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mockClient := &mockAppConfigDataAPI{
+				startSessionFunc: tc.startSessionFunc,
+				getConfigFunc:    tc.getConfigFunc,
+			}
 
-		_, err := source.GetLatestConfiguration(context.Background(), "app", "prd", "default")
-		if err == nil {
-			t.Error("expected error due to empty configuration data, got nil")
-		}
-	})
+			source := NewSource(aws.Config{})
+			source.client = mockClient
+
+			_, err := source.GetLatestConfiguration(context.Background(), "app", "prd", "default")
+			if tc.expectedError != nil {
+				if err == nil {
+					t.Error("expected error, got nil")
+				} else if !errors.Is(err, tc.expectedError) && err.Error() != tc.expectedError.Error() {
+					// Check if specific mock error matches or if message is returned
+					if errors.Is(tc.expectedError, mockStartErr) || errors.Is(tc.expectedError, mockGetConfigErr) {
+						t.Errorf("expected error %v, got %v", tc.expectedError, err)
+					}
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
 }
 
 func TestGetLatestConfiguration_LocalCircuitBreakerTriggers(t *testing.T) {
@@ -235,5 +235,32 @@ func TestGetLatestConfiguration_SharedCircuitBreaker(t *testing.T) {
 
 	if config.Content() != "val" {
 		t.Errorf("expected content 'val', got %q", config.Content())
+	}
+}
+
+func TestGetLatestConfiguration_SharedCircuitBreaker_Error(t *testing.T) {
+	mockErr := errors.New("shared cb error")
+	mockClient := &mockAppConfigDataAPI{
+		startSessionFunc: func(ctx context.Context, params *appconfigdata.StartConfigurationSessionInput) (*appconfigdata.StartConfigurationSessionOutput, error) {
+			return nil, mockErr
+		},
+	}
+
+	source := NewSource(aws.Config{})
+	scb := NewSharedCircuitBreaker(aws.Config{}, "CB_TABLE", 3, 100*time.Millisecond)
+	source.WithSharedCircuitBreaker(scb)
+	source.client = mockClient
+
+	_, err := source.GetLatestConfiguration(context.Background(), "app", "prd", "default")
+	if !errors.Is(err, mockErr) {
+		t.Errorf("expected error %v, got %v", mockErr, err)
+	}
+}
+
+func TestGetClient_DefaultInitialization(t *testing.T) {
+	source := NewSource(aws.Config{})
+	client := source.getClient()
+	if client == nil {
+		t.Error("expected client to be initialized by default, got nil")
 	}
 }

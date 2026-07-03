@@ -31,67 +31,66 @@ func (m *mockDynamoDB) Query(ctx context.Context, params *dynamodb.QueryInput, o
 }
 
 func TestSharedCircuitBreaker_GetState(t *testing.T) {
-	t.Run("Item not found returns Closed", func(t *testing.T) {
-		mockClient := &mockDynamoDB{
+	expectedOpen := circuitState{
+		Application: "app",
+		Environment: "prd",
+		State:       string(StateOpen),
+	}
+	openItem, _ := attributevalue.MarshalMap(expectedOpen)
+	mockErr := errors.New("dynamodb error")
+
+	tests := []struct {
+		name          string
+		getItemFunc   func(ctx context.Context, params *dynamodb.GetItemInput) (*dynamodb.GetItemOutput, error)
+		expectedState string
+		expectedError error
+	}{
+		{
+			name: "Item not found returns Closed",
 			getItemFunc: func(ctx context.Context, params *dynamodb.GetItemInput) (*dynamodb.GetItemOutput, error) {
 				return &dynamodb.GetItemOutput{Item: nil}, nil
 			},
-		}
-
-		scb := NewSharedCircuitBreaker(aws.Config{}, "test-table", 3, 100*time.Millisecond)
-		scb.client = mockClient
-
-		stateStr, err := scb.GetState(context.Background(), "app", "prd")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if stateStr != string(StateClosed) {
-			t.Errorf("expected Closed state, got %v", stateStr)
-		}
-	})
-
-	t.Run("GetItem returns correct state", func(t *testing.T) {
-		expectedState := circuitState{
-			Application: "app",
-			Environment: "prd",
-			State:       string(StateOpen),
-		}
-		item, _ := attributevalue.MarshalMap(expectedState)
-
-		mockClient := &mockDynamoDB{
+			expectedState: string(StateClosed),
+			expectedError: nil,
+		},
+		{
+			name: "GetItem returns correct state",
 			getItemFunc: func(ctx context.Context, params *dynamodb.GetItemInput) (*dynamodb.GetItemOutput, error) {
-				return &dynamodb.GetItemOutput{Item: item}, nil
+				return &dynamodb.GetItemOutput{Item: openItem}, nil
 			},
-		}
-
-		scb := NewSharedCircuitBreaker(aws.Config{}, "test-table", 3, 100*time.Millisecond)
-		scb.client = mockClient
-
-		stateStr, err := scb.GetState(context.Background(), "app", "prd")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if stateStr != string(StateOpen) {
-			t.Errorf("expected Open state, got %v", stateStr)
-		}
-	})
-
-	t.Run("GetItem fails", func(t *testing.T) {
-		mockErr := errors.New("dynamodb error")
-		mockClient := &mockDynamoDB{
+			expectedState: string(StateOpen),
+			expectedError: nil,
+		},
+		{
+			name: "GetItem fails",
 			getItemFunc: func(ctx context.Context, params *dynamodb.GetItemInput) (*dynamodb.GetItemOutput, error) {
 				return nil, mockErr
 			},
-		}
+			expectedState: "",
+			expectedError: mockErr,
+		},
+	}
 
-		scb := NewSharedCircuitBreaker(aws.Config{}, "test-table", 3, 100*time.Millisecond)
-		scb.client = mockClient
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			scb := NewSharedCircuitBreaker(aws.Config{}, "test-table", 3, 100*time.Millisecond)
+			scb.client = &mockDynamoDB{getItemFunc: tc.getItemFunc}
 
-		_, err := scb.GetState(context.Background(), "app", "prd")
-		if !errors.Is(err, mockErr) {
-			t.Errorf("expected error %v, got %v", mockErr, err)
-		}
-	})
+			stateStr, err := scb.GetState(context.Background(), "app", "prd")
+			if tc.expectedError != nil {
+				if !errors.Is(err, tc.expectedError) {
+					t.Errorf("expected error %v, got %v", tc.expectedError, err)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if stateStr != tc.expectedState {
+					t.Errorf("expected state %v, got %v", tc.expectedState, stateStr)
+				}
+			}
+		})
+	}
 }
 
 func TestSharedCircuitBreaker_Call(t *testing.T) {
@@ -207,58 +206,192 @@ func TestSharedCircuitBreaker_Call(t *testing.T) {
 			t.Errorf("expected DynamoDB state to transition to Closed, got %v", putState.State)
 		}
 	})
-}
 
-func TestSharedCircuitBreaker_ListStates(t *testing.T) {
-	t.Run("Query succeeds", func(t *testing.T) {
-		states := []circuitState{
-			{Application: "app", Environment: "prd", State: "closed"},
-			{Application: "app", Environment: "stg", State: "open"},
+	t.Run("Transition Open -> Half-Open -> Open on failure", func(t *testing.T) {
+		// Open state that expired
+		dbState := circuitState{
+			Application:     "app",
+			Environment:     "prd",
+			State:           string(StateOpen),
+			LastFailureTime: time.Now().Add(-10 * time.Second).UnixMilli(),
 		}
-		items := make([]map[string]types.AttributeValue, len(states))
-		for i, s := range states {
-			items[i], _ = attributevalue.MarshalMap(s)
-		}
+		item, _ := attributevalue.MarshalMap(dbState)
 
+		var putState circuitState
 		mockClient := &mockDynamoDB{
-			queryFunc: func(ctx context.Context, params *dynamodb.QueryInput) (*dynamodb.QueryOutput, error) {
-				return &dynamodb.QueryOutput{
-					Items: items,
-				}, nil
+			getItemFunc: func(ctx context.Context, params *dynamodb.GetItemInput) (*dynamodb.GetItemOutput, error) {
+				return &dynamodb.GetItemOutput{Item: item}, nil
+			},
+			putItemFunc: func(ctx context.Context, params *dynamodb.PutItemInput) (*dynamodb.PutItemOutput, error) {
+				_ = attributevalue.UnmarshalMap(params.Item, &putState)
+				return &dynamodb.PutItemOutput{}, nil
 			},
 		}
 
-		scb := NewSharedCircuitBreaker(aws.Config{}, "test-table", 3, 100*time.Millisecond)
+		scb := NewSharedCircuitBreaker(aws.Config{}, "test-table", 3, 50*time.Millisecond)
 		scb.client = mockClient
 
-		results, err := scb.ListStates(context.Background(), "app")
+		errDummy := errors.New("dummy error")
+		err := scb.Call(context.Background(), "app", "prd", func() error { return errDummy })
+		if !errors.Is(err, errDummy) {
+			t.Fatalf("expected dummy error, got %v", err)
+		}
+
+		if putState.State != string(StateOpen) {
+			t.Errorf("expected DynamoDB state to transition back to Open on failure, got %v", putState.State)
+		}
+	})
+
+	t.Run("getState UnmarshalMap failure", func(t *testing.T) {
+		// Return invalid item attributes (e.g. failureCount is a List)
+		invalidItem := map[string]types.AttributeValue{
+			"PK":           &types.AttributeValueMemberS{Value: "app"},
+			"SK":           &types.AttributeValueMemberS{Value: "prd"},
+			"failureCount": &types.AttributeValueMemberL{Value: []types.AttributeValue{}},
+		}
+
+		mockClient := &mockDynamoDB{
+			getItemFunc: func(ctx context.Context, params *dynamodb.GetItemInput) (*dynamodb.GetItemOutput, error) {
+				return &dynamodb.GetItemOutput{Item: invalidItem}, nil
+			},
+		}
+
+		scb := NewSharedCircuitBreaker(aws.Config{}, "test-table", 3, 50*time.Millisecond)
+		scb.client = mockClient
+
+		_, err := scb.getState(context.Background(), "app", "prd")
+		if err == nil {
+			t.Error("expected unmarshal error, got nil")
+		}
+	})
+
+	t.Run("recordDynamoSuccess resets error state", func(t *testing.T) {
+		mockClient := &mockDynamoDB{
+			getItemFunc: func(ctx context.Context, params *dynamodb.GetItemInput) (*dynamodb.GetItemOutput, error) {
+				return &dynamodb.GetItemOutput{Item: nil}, nil
+			},
+			putItemFunc: func(ctx context.Context, params *dynamodb.PutItemInput) (*dynamodb.PutItemOutput, error) {
+				return &dynamodb.PutItemOutput{}, nil
+			},
+		}
+
+		scb := NewSharedCircuitBreaker(aws.Config{}, "test-table", 3, 50*time.Millisecond)
+		scb.client = mockClient
+
+		// Artificially trigger a Dynamo error
+		scb.recordDynamoError()
+		if !scb.shouldUseFallback() {
+			t.Fatal("expected fallback to be active after error")
+		}
+
+		// Artificially expire the dynamo retry cooldown (so shouldUseFallback becomes false, but lastDynamoError is still not zero)
+		scb.mu.Lock()
+		scb.lastDynamoError = time.Now().Add(-10 * time.Second)
+		scb.mu.Unlock()
+
+		if scb.shouldUseFallback() {
+			t.Fatal("expected fallback to be inactive after cooldown expired")
+		}
+
+		// Now make a call that succeeds (this calls setState and recordDynamoSuccess)
+		err := scb.Call(context.Background(), "app", "prd", func() error { return nil })
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		if len(results) != 2 {
-			t.Fatalf("expected 2 states, got %d", len(results))
-		}
+		// lastDynamoError should be reset to zero
+		scb.mu.Lock()
+		isZero := scb.lastDynamoError.IsZero()
+		scb.mu.Unlock()
 
-		if results[0].Environment != "prd" || results[1].Environment != "stg" {
-			t.Errorf("unexpected query results: %+v", results)
+		if !isZero {
+			t.Error("expected lastDynamoError to be reset to zero after successful DynamoDB call")
 		}
 	})
+}
 
-	t.Run("Query fails", func(t *testing.T) {
-		mockErr := errors.New("dynamo query failed")
-		mockClient := &mockDynamoDB{
+func TestSharedCircuitBreaker_ListStates(t *testing.T) {
+	states := []circuitState{
+		{Application: "app", Environment: "prd", State: "closed"},
+		{Application: "app", Environment: "stg", State: "open"},
+	}
+	items := make([]map[string]types.AttributeValue, len(states))
+	for i, s := range states {
+		items[i], _ = attributevalue.MarshalMap(s)
+	}
+	mockErr := errors.New("dynamo query failed")
+
+	invalidItem := map[string]types.AttributeValue{
+		"PK":           &types.AttributeValueMemberS{Value: "app"},
+		"failureCount": &types.AttributeValueMemberL{Value: []types.AttributeValue{}},
+	}
+
+	tests := []struct {
+		name          string
+		queryFunc     func(ctx context.Context, params *dynamodb.QueryInput) (*dynamodb.QueryOutput, error)
+		expectedLen   int
+		expectedError error
+	}{
+		{
+			name: "Query succeeds",
+			queryFunc: func(ctx context.Context, params *dynamodb.QueryInput) (*dynamodb.QueryOutput, error) {
+				return &dynamodb.QueryOutput{Items: items}, nil
+			},
+			expectedLen:   2,
+			expectedError: nil,
+		},
+		{
+			name: "Query fails",
 			queryFunc: func(ctx context.Context, params *dynamodb.QueryInput) (*dynamodb.QueryOutput, error) {
 				return nil, mockErr
 			},
-		}
+			expectedLen:   0,
+			expectedError: mockErr,
+		},
+		{
+			name: "UnmarshalListOfMaps fails",
+			queryFunc: func(ctx context.Context, params *dynamodb.QueryInput) (*dynamodb.QueryOutput, error) {
+				return &dynamodb.QueryOutput{Items: []map[string]types.AttributeValue{invalidItem}}, nil
+			},
+			expectedLen:   0,
+			expectedError: mockErr, // check presence of error
+		},
+	}
 
-		scb := NewSharedCircuitBreaker(aws.Config{}, "test-table", 3, 100*time.Millisecond)
-		scb.client = mockClient
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			scb := NewSharedCircuitBreaker(aws.Config{}, "test-table", 3, 100*time.Millisecond)
+			scb.client = &mockDynamoDB{queryFunc: tc.queryFunc}
 
-		_, err := scb.ListStates(context.Background(), "app")
-		if !errors.Is(err, mockErr) {
-			t.Errorf("expected error %v, got %v", mockErr, err)
-		}
-	})
+			results, err := scb.ListStates(context.Background(), "app")
+			if tc.expectedError != nil {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if len(results) != tc.expectedLen {
+					t.Errorf("expected %d states, got %d", tc.expectedLen, len(results))
+				}
+			}
+		})
+	}
+}
+
+func TestSharedCircuitBreaker_SetStateMarshalError(t *testing.T) {
+	mockErr := errors.New("marshal error")
+	origMarshalMap := marshalMap
+	defer func() { marshalMap = origMarshalMap }()
+
+	marshalMap = func(v interface{}) (map[string]types.AttributeValue, error) {
+		return nil, mockErr
+	}
+
+	scb := NewSharedCircuitBreaker(aws.Config{}, "test-table", 3, 100*time.Millisecond)
+	err := scb.setState(context.Background(), &circuitState{})
+	if !errors.Is(err, mockErr) {
+		t.Errorf("expected error %v, got %v", mockErr, err)
+	}
 }
