@@ -185,7 +185,9 @@ scripts/k6/*.json
 
 # Coverage / reports
 coverage.out
+cover.out
 cover.html
+coverage.txt
 coverage/
 reports/
 
@@ -201,3 +203,6 @@ terraform/*.tfstate.*
 terraform/*.tfplan
 terraform/dev-*.tfvars
 terraform/prd-*.tfvars
+
+# Jira Backlog (Technical planning kept local)
+docs/jira-backlog.md
