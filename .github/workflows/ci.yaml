@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  ci:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -42,3 +42,40 @@ jobs:
 
       - name: Run Go Vet
         run: go vet ./...
+
+  test:
+    if: github.event.pull_request.draft == false
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Run Tests with Coverage
+        run: |
+          go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Generate Coverage Report
+        run: |
+          go tool cover -func=coverage.out > coverage.txt
+          cat coverage.txt
+
+      - name: Verify Minimum Coverage (80% - Warning Only)
+        run: |
+          total_cov=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | tr -d '%')
+          echo "Calculated total coverage: $total_cov%"
+
+          awk -v cov="$total_cov" 'BEGIN {
+            if (cov < 80.0) {
+              print "::warning::Code coverage of " cov "% is below the recommended threshold of 80%!"
+            } else {
+              print "✅ SUCCESS: Code coverage of " cov "% meets the recommended threshold of 80%."
+            }
+          }'
+        shell: bash
