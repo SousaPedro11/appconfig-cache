@@ -217,8 +217,8 @@ Generated artifact:
 
 - `dist/lambda.zip`
 
-## Deployment Notes
-
-- Recommended runtime: `provided.al2023`
-- Handler: `bootstrap` (the binary inside the zip)
 - Current build architecture: `amd64`
+
+## Contributing
+
+For guidelines on local environment setup, Git hooks installation, and development practices, please check our [Contributing Guide](CONTRIBUTING.md).

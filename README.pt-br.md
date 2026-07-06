@@ -217,8 +217,8 @@ Artefato gerado:
 
 - `dist/lambda.zip`
 
-## Observações de deploy
-
-- Runtime recomendado: `provided.al2023`
-- Handler: `bootstrap` (arquivo dentro do zip)
 - Arquitetura do build atual: `amd64`
+
+## Contribuição
+
+Para diretrizes de configuração do ambiente local, instalação de Git hooks e boas práticas de desenvolvimento, consulte o nosso [Guia de Contribuição](CONTRIBUTING.pt-br.md).
