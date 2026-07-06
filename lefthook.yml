@@ -1,0 +1,20 @@
+# Lefthook Git Hooks Configuration
+# Reference: https://github.com/evilmartians/lefthook
+
+pre-commit:
+  parallel: false
+  commands:
+    go-fmt:
+      run: go fmt ./...
+    go-imports:
+      run: $(go env GOPATH)/bin/goimports -w -local github.com/sousapedro11/appconfig-cache .
+    golangci-lint:
+      run: golangci-lint run
+    terraform-fmt:
+      glob: "*.tf"
+      run: terraform fmt {staged_files}
+
+commit-msg:
+  commands:
+    conventional-commits:
+      run: bash scripts/validate_commit_msg.sh {1}

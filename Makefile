@@ -2,7 +2,7 @@ APP_NAME := appconfig-cache
 DIST_DIR := dist
 LAMBDA_BIN := bootstrap
 
-.PHONY: tidy fmt test build-local run-local build-lambda clean
+.PHONY: tidy fmt test build-local run-local build-lambda clean setup
 
 tidy:
 	go mod tidy
@@ -34,3 +34,9 @@ build-lambda:
 
 clean:
 	rm -rf $(DIST_DIR)
+
+setup:
+	go install github.com/evilmartians/lefthook@latest
+	go install golang.org/x/tools/cmd/goimports@latest
+	$(shell go env GOPATH)/bin/lefthook install
+
