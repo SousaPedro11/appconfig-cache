@@ -8,6 +8,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/appconfigdata"
+
 	"github.com/sousapedro11/appconfig-cache/internal/domain"
 )
 

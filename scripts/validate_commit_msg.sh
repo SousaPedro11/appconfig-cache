@@ -1,19 +1,14 @@
 #!/usr/bin/env bash
 
-# Get the commit message file path
 COMMIT_MSG_FILE=$1
 
-# Read the commit message
 COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")
 
-# Bypass validation for merge/revert/amend/chore(deps) commits
 if [[ "$COMMIT_MSG" =~ ^Merge.* || "$COMMIT_MSG" =~ ^Revert.* || "$COMMIT_MSG" =~ ^amend.* ]]; then
     exit 0
 fi
 
-# Regular expression for Conventional Commits
-# type(scope): message OR type: message
-CONVENTIONAL_COMMIT_REGEX="^(feat|fix|refactor|docs|test|chore|build|ci)(\([a-z0-9_-]+\))?!?: .+$"
+CONVENTIONAL_COMMIT_REGEX="^(feat|fix|refactor|docs|test|chore|build|ci|style)(\([a-z0-9_-]+\))?!?: .+$"
 
 if [[ ! "$COMMIT_MSG" =~ $CONVENTIONAL_COMMIT_REGEX ]]; then
     echo "====================================================================="

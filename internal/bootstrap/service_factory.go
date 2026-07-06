@@ -12,6 +12,7 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/redis/go-redis/v9"
+
 	"github.com/sousapedro11/appconfig-cache/internal/application"
 	"github.com/sousapedro11/appconfig-cache/internal/infrastructure/appconfig"
 	"github.com/sousapedro11/appconfig-cache/internal/infrastructure/cache"

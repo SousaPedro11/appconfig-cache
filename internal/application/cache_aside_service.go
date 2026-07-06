@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/sousapedro11/appconfig-cache/internal/domain"
 	"golang.org/x/sync/singleflight"
+
+	"github.com/sousapedro11/appconfig-cache/internal/domain"
 )
 
 type CacheAsideService struct {

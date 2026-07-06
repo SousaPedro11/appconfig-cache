@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
 	"github.com/sousapedro11/appconfig-cache/internal/domain"
 )
 

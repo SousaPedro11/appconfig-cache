@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-redis/redismock/v9"
+
 	"github.com/sousapedro11/appconfig-cache/internal/domain"
 )
 
