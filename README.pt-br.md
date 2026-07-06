@@ -78,7 +78,7 @@ make run-server ADDR=:8080
 Healthcheck:
 
 ```bash
-curl http://localhost:8080/healthz
+curl http://localhost:8080/health
 ```
 
 Buscar configuração (GET):

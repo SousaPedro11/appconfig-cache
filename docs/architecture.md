@@ -149,7 +149,7 @@ The directory structure of the repository is organized cleanly:
 
 - `cmd/`: Application entrypoints.
   - `cmd/lambda/`: Initialization code and AWS Lambda handler (handling API Gateway contracts).
-  - `cmd/server/`: Local HTTP server (supporting `/v1/config` and `/healthz` routes).
+  - `cmd/server/`: Local HTTP server (supporting `/v1/config` and `/health` routes).
   - `cmd/local/`: Fast CLI runner for manual local testing.
 - `internal/domain/`: Pure Go domain models and validation rules.
   - `configuration_request.go`: Validates required fields (`application`, `environment`, `profile`).
